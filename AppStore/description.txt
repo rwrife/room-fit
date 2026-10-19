@@ -1,0 +1,5 @@
+Room Fit — a room-layout planner without accounts or cloud sync.
+
+Planning preview: Room Fit is not released yet. Planned features let you enter room dimensions, add doors and windows, arrange furniture to scale, and see approximate walkway and door-swing clearances. Save more than one layout per room to compare ideas, and export/import a JSON copy you own. Designed for phone, tablet, and Windows with touch and keyboard/mouse controls.
+
+No camera scanning, floor-plan subscriptions, or network access. Always verify measurements and actual fit in the room before buying or moving furniture; Room Fit is not an accessibility or building-code compliance tool.
