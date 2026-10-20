@@ -54,11 +54,13 @@ Existing room planners (Planner 5D, magicplan, IKEA Kreativ) lead with 3D render
 
 ## Current status
 
-Scaffold only: documentation, toolchain pin, store copy draft, and generated icon. No application code yet — see the issue backlog for the build order.
+Flutter workspace (Windows + Android + iOS) with an adaptive shell and CI
+(Windows test/release build, Android test/debug APK). Domain geometry, editor
+UI, and persistence land in the issue backlog below the skeleton milestone.
 
 ## Milestones
 
-1. Flutter skeleton (windows/android/ios enabled) + CI (Windows release build lane, Docker Linux checks).
+1. Flutter skeleton (windows/android/ios enabled) + CI (Windows release build lane, Linux checks).
 2. Pure-Dart domain core: rooms, furniture, placement geometry, clearance engine + tests.
 3. Editor canvas + furniture library UI with adaptive widgets.
 4. Persistence, export/import, privacy controls.
@@ -66,14 +68,20 @@ Scaffold only: documentation, toolchain pin, store copy draft, and generated ico
 
 ## Development / build quickstart
 
-Development happens in CI and Docker (dev host is arm64 Linux; the official Flutter SDK is x64):
+CI runs on hosted x64 Windows/Linux runners with Flutter 3.47.7. Build locally
+on an x64 host with Flutter 3.47.7:
 
 ```
-# CI-equivalent checks (x64 Docker)
-docker run --rm -v "$PWD:/w" -w /w ghcr.io/cirruslabs/flutter:3.47.7 flutter test
-docker run --rm -v "$PWD:/w" -w /w ghcr.io/cirruslabs/flutter:3.47.7 flutter build apk --debug
-# Windows release (GitHub Actions windows-latest)
-flutter build windows --release
+flutter pub get --enforce-lockfile
+flutter analyze && flutter test
+flutter build windows --release  # Windows only
+flutter build apk --debug       # Linux x64 or Windows with Android SDK
 ```
 
-Pinned toolchain: see `toolchain.json` (Flutter 3.47.7 stable / Dart 3.13.5). Identifiers: `com.infinityball.roomfit` (Android applicationId, iOS bundle ID, Windows identity `cominfinityball.roomfit`).
+This development host is Linux ARM64. Its official Flutter archive is x64-only;
+for local format/analyze/test checks it uses an official Dart 3.13.5 ARM64 SDK
+grafted into Flutter 3.47.7 sources. Flutter Windows builds require Windows;
+Android APKs require a working x64 Android SDK/host; iOS builds require macOS
+and Xcode. CI records those platform build results separately.
+
+Pinned toolchain: see `toolchain.json` (Flutter 3.47.7 stable / Dart 3.13.5). Identifiers: `com.infinityball.roomfit` (Android applicationId, iOS bundle ID, Windows identity `cominfinityball.roomfit`). Windows identity is reserved for future MSIX packaging; current CI produces a portable build.
