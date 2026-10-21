@@ -155,23 +155,24 @@ void main() {
 
   group('Walkway approximation', () {
     test('narrow walkway through furniture corridor is constrained', () {
-      // 3000x2000 room with two furniture islands leaving a 600mm central slot.
-      // Top island: y from 0 to 700. Bottom island: y from 1300 to 2000.
-      // Slot: y in (700, 1300) -> 600mm width.
+      // 4000x2000 room; two full-run islands leave a 600mm central slot
+      // (y in 700..1300). Endpoints sit >300mm from every wall so the
+      // corridor, not the room edges, is the bottleneck.
       final plan = RoomPlan(
-        width: 3000,
+        width: 4000,
         height: 2000,
-        furniture: [MmRect(500, 0, 1000, 700), MmRect(500, 1300, 1000, 700)],
+        furniture: [MmRect(800, 0, 2400, 700), MmRect(800, 1300, 2400, 700)],
       );
 
       final width = plan.approximateWalkwayMm(
-        const MmPoint(100, 1000),
-        const MmPoint(2900, 1000),
+        const MmPoint(400, 1000),
+        const MmPoint(3600, 1000),
         cellMm: 50,
       );
 
       expect(width, isNotNull);
-      // Theoretical maximum clearance is 600mm; sampled corridor within 100mm.
+      // True corridor is 600mm; 50mm sampling reads cell-centre clearance.
+      // Approximation caveat, not a code-compliance measurement.
       expect(width!, greaterThan(450));
       expect(width, lessThanOrEqualTo(650));
     });

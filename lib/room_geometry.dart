@@ -318,8 +318,9 @@ class RoomPlan {
       if (clearances[start] <= 0 ||
           clearances[end] <= 0 ||
           clearances[start] < radius ||
-          clearances[end] < radius)
+          clearances[end] < radius) {
         return false;
+      }
       final visited = List<bool>.filled(cols * rows, false);
       final queue = <int>[start];
       visited[start] = true;
