@@ -2,6 +2,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'room_editor.dart';
+
 void main() {
   runApp(const RoomFitApp());
 }
@@ -38,33 +40,20 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return AdaptiveShell(
-      title: 'Room Fit',
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Text(
-                'Sketch a room to scale. Place real furniture sizes. '
-                'Check clearances before you haul anything.',
-                textAlign: TextAlign.center,
-              ),
-              SizedBox(height: 16),
-              // Planning-aid disclaimer required by the product contract.
-              Text(
-                'Clearance readouts are planning aids, not building-code or '
-                'accessibility compliance.',
-                textAlign: TextAlign.center,
-              ),
-            ],
+  Widget build(BuildContext context) => AdaptiveShell(
+    title: 'Room Fit',
+    body: const Column(
+      children: [
+        Padding(
+          padding: EdgeInsets.all(8),
+          child: Text(
+            'Room sketch is a planning aid, not building-code or accessibility compliance.',
           ),
         ),
-      ),
-    );
-  }
+        Expanded(child: RoomEditor()),
+      ],
+    ),
+  );
 }
 
 /// Platform-native application shell.
