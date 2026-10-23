@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'furniture_catalog.dart';
+import 'fit_feedback.dart';
 import 'room_geometry.dart';
 
 // ponytail: single room, rectangular footprints, fit-to-view zoom only;
@@ -26,6 +27,7 @@ class _Snapshot {
 
 class _RoomEditorState extends State<RoomEditor> {
   static const int gridMm = 100;
+  static const List<int> clearanceTargets = [600, 750, 900];
 
   RoomPlan plan = RoomPlan(width: 4000, height: 3000);
   List<String> names = const [];
@@ -33,6 +35,7 @@ class _RoomEditorState extends State<RoomEditor> {
   int? _selected;
   double _zoom = 1;
   bool _snap = true;
+  int _targetIndex = 1;
 
   // Drag bookkeeping: baseline pointer + piece origin so sub-grid deltas
   // accumulate instead of rounding to zero, plus one undo entry per gesture.
@@ -355,6 +358,15 @@ class _RoomEditorState extends State<RoomEditor> {
       _undo();
       return KeyEventResult.handled;
     }
+    if (event.logicalKey == LogicalKeyboardKey.tab) {
+      if (names.isEmpty) return KeyEventResult.ignored;
+      final direction = HardwareKeyboard.instance.isShiftPressed ? -1 : 1;
+      var next = _selected == null ? 0 : _selected! + direction;
+      next = next % names.length;
+      if (next < 0) next = names.length - 1;
+      setState(() => _selected = next);
+      return KeyEventResult.handled;
+    }
     if (_selected == null) return KeyEventResult.ignored;
     final coarse = HardwareKeyboard.instance.isShiftPressed;
     final step = coarse ? 100 : (_snap ? gridMm : 10);
@@ -380,6 +392,10 @@ class _RoomEditorState extends State<RoomEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final feedback = FitFeedback.evaluate(
+      plan,
+      targetMm: clearanceTargets[_targetIndex],
+    );
     return Focus(
       autofocus: true,
       canRequestFocus: true,
@@ -387,76 +403,149 @@ class _RoomEditorState extends State<RoomEditor> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Wrap(
-            children: [
-              _action('Room size', _editRoom),
-              _action('Add opening', _addOpening),
-              _action('Catalog', _addFromCatalog),
-              _action('Custom', _customPiece),
-              _action(
-                'Undo',
-                _history.isEmpty || _dragSnapshot != null ? null : _undo,
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    children: [
+                      _action('Room size', _editRoom),
+                      _action('Add opening', _addOpening),
+                      _action('Catalog', _addFromCatalog),
+                      _action('Custom', _customPiece),
+                      _action(
+                        'Undo',
+                        _history.isEmpty || _dragSnapshot != null
+                            ? null
+                            : _undo,
+                      ),
+                      _action('Snap ${_snap ? 'on' : 'off'}', () {
+                        setState(() => _snap = !_snap);
+                      }),
+                      _action('Zoom out', () {
+                        setState(() => _zoom = math.max(0.4, _zoom / 1.25));
+                      }),
+                      _action('Zoom in', () {
+                        setState(() => _zoom = math.min(4, _zoom * 1.25));
+                      }),
+                    ],
+                  ),
+                  Padding(
+                    key: const Key('clearanceRow'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: Semantics(
+                      container: true,
+                      label: 'Clearance target',
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            'Clearance target',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          for (var i = 0; i < clearanceTargets.length; i++)
+                            _action(
+                              '${clearanceTargets[i]} mm',
+                              () => setState(() => _targetIndex = i),
+                            ),
+                          Text(
+                            'Sampled walkway '
+                            '${feedback.walkwayMm == null ? 'unreachable' : '~${feedback.walkwayMm} mm (approx.)'}',
+                            key: const Key('walkwayReadout'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: Text(
+                      'Room ${plan.width} × ${plan.height} mm · tap or drag furniture · '
+                      'arrows nudge, Shift+arrow 100 mm, Ctrl+Z undo, Delete removes. '
+                      'Planning aid only — not building-code or accessibility compliance.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  if (_selected != null)
+                    Padding(
+                      key: const Key('selectionRow'),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Text(
+                        'Selected ${names[_selected!]} · '
+                        '${plan.furniture[_selected!].width} × ${plan.furniture[_selected!].height} mm '
+                        '(~${mmToInches(plan.furniture[_selected!].width).toStringAsFixed(1)} × '
+                        '${mmToInches(plan.furniture[_selected!].height).toStringAsFixed(1)} in) '
+                        'at ${plan.furniture[_selected!].x}, ${plan.furniture[_selected!].y} mm',
+                      ),
+                    ),
+                  SizedBox(
+                    height: 56,
+                    child: feedback.warnings.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'No fit warnings. Approximate — not a code check.',
+                              ),
+                            ),
+                          )
+                        : ListView(
+                            key: const Key('fitWarnings'),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            children: [
+                              for (final warning in feedback.warnings)
+                                Text(
+                                  '⚠ $warning',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                  ),
+                  if (_selected != null)
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _action('Rotate 90°', _rotateSelected),
+                        _action('Remove', _removeSelected),
+                        _action('Nudge left', () {
+                          final r = plan.furniture[_selected!];
+                          _moveCommitted(_selected!, r.x - 100, r.y);
+                        }),
+                        _action('Nudge right', () {
+                          final r = plan.furniture[_selected!];
+                          _moveCommitted(_selected!, r.x + 100, r.y);
+                        }),
+                        _action('Nudge up', () {
+                          final r = plan.furniture[_selected!];
+                          _moveCommitted(_selected!, r.x, r.y - 100);
+                        }),
+                        _action('Nudge down', () {
+                          final r = plan.furniture[_selected!];
+                          _moveCommitted(_selected!, r.x, r.y + 100);
+                        }),
+                      ],
+                    ),
+                ],
               ),
-              _action('Snap ${_snap ? 'on' : 'off'}', () {
-                setState(() => _snap = !_snap);
-              }),
-              _action('Zoom out', () {
-                setState(() => _zoom = math.max(0.4, _zoom / 1.25));
-              }),
-              _action('Zoom in', () {
-                setState(() => _zoom = math.min(4, _zoom * 1.25));
-              }),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            child: Text(
-              'Room ${plan.width} × ${plan.height} mm · tap or drag furniture · '
-              'arrows nudge, Shift+arrow 100 mm, Ctrl+Z undo, Delete removes. '
-              'Planning aid only — not building-code or accessibility compliance.',
-              style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
-          if (_selected != null)
-            Padding(
-              key: const Key('selectionRow'),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                'Selected ${names[_selected!]} · '
-                '${plan.furniture[_selected!].width} × ${plan.furniture[_selected!].height} mm '
-                'at ${plan.furniture[_selected!].x}, ${plan.furniture[_selected!].y} mm',
-              ),
-            ),
-          if (_selected != null)
-            Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _action('Rotate 90°', _rotateSelected),
-                _action('Remove', _removeSelected),
-                _action('Nudge left', () {
-                  final r = plan.furniture[_selected!];
-                  _moveCommitted(_selected!, r.x - 100, r.y);
-                }),
-                _action('Nudge right', () {
-                  final r = plan.furniture[_selected!];
-                  _moveCommitted(_selected!, r.x + 100, r.y);
-                }),
-                _action('Nudge up', () {
-                  final r = plan.furniture[_selected!];
-                  _moveCommitted(_selected!, r.x, r.y - 100);
-                }),
-                _action('Nudge down', () {
-                  final r = plan.furniture[_selected!];
-                  _moveCommitted(_selected!, r.x, r.y + 100);
-                }),
-              ],
-            ),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final fit = math.min(
-                  (constraints.maxWidth - 24) / plan.width,
-                  (constraints.maxHeight - 24) / plan.height,
+                final fit = math.max(
+                  0.01,
+                  math.min(
+                    (constraints.maxWidth - 24) / plan.width,
+                    (constraints.maxHeight - 24) / plan.height,
+                  ),
                 );
                 return ClipRect(
                   child: Center(
@@ -480,7 +569,12 @@ class _RoomEditorState extends State<RoomEditor> {
                           onPanCancel: _dragEnd,
                           child: CustomPaint(
                             key: const Key('roomCanvas'),
-                            painter: RoomPainter(plan, _selected, fit),
+                            painter: RoomPainter(
+                              plan,
+                              _selected,
+                              fit,
+                              feedback,
+                            ),
                           ),
                         ),
                       ),
@@ -614,11 +708,12 @@ class _MeasurementDialogState extends State<_MeasurementDialog> {
 }
 
 class RoomPainter extends CustomPainter {
-  RoomPainter(this.plan, this.selected, this.scale);
+  RoomPainter(this.plan, this.selected, this.scale, this.feedback);
 
   final RoomPlan plan;
   final int? selected;
   final double scale;
+  final FitFeedback feedback;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -641,11 +736,14 @@ class RoomPainter extends CustomPainter {
       canvas.drawRect(
         box,
         Paint()
-          ..color = i == selected
+          ..color = feedback.conflictItems.contains(i)
+              ? const Color(0xFFE06C75)
+              : i == selected
               ? const Color(0xFF237C9A)
               : const Color(0xFF8FBC94),
       );
       canvas.drawRect(box, outline);
+      _paintDimensions(canvas, box, r);
     }
     for (final opening in plan.openings) {
       final start = opening.offset * scale;
@@ -667,9 +765,39 @@ class RoomPainter extends CustomPainter {
       );
     }
     canvas.drawRect(Offset.zero & size, outline);
+    _label(canvas, '${plan.width} mm', Offset(size.width / 2 - 32, 4));
+    _label(canvas, '${plan.height} mm', const Offset(4, 4));
+  }
+
+  void _paintDimensions(Canvas canvas, Rect box, MmRect footprint) {
+    if (box.width < 50 || box.height < 28) return;
+    _label(
+      canvas,
+      '${footprint.width} × ${footprint.height} mm',
+      box.topLeft + const Offset(4, 4),
+    );
+  }
+
+  void _label(Canvas canvas, String text, Offset at) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: const TextStyle(
+          color: Color(0xFF102027),
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    painter.paint(canvas, at);
   }
 
   @override
   bool shouldRepaint(RoomPainter old) =>
-      old.plan != plan || old.selected != selected || old.scale != scale;
+      old.plan != plan ||
+      old.selected != selected ||
+      old.scale != scale ||
+      old.feedback.targetMm != feedback.targetMm;
 }

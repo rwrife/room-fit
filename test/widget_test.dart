@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:room_fit/main.dart';
 import 'package:room_fit/room_editor.dart';
@@ -13,10 +14,16 @@ Future<void> _onPlatform(
   Future<void> Function() body,
 ) async {
   debugDefaultTargetPlatformOverride = platform;
+  // Tall surface so every control row is on screen; the chrome scrolls on
+  // short phone windows.
+  tester.view.physicalSize = const Size(1000, 1800);
+  tester.view.devicePixelRatio = 1;
   try {
     await body();
   } finally {
     debugDefaultTargetPlatformOverride = null;
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
   }
 }
 
@@ -130,6 +137,46 @@ void main() {
         find.textContaining('Selected Queen Bed · 1520 × 2030 mm'),
         findsOneWidget,
       );
+    });
+  });
+
+  testWidgets('Tab cycles selection, overlap warns, target is selectable', (
+    tester,
+  ) async {
+    await _onPlatform(tester, TargetPlatform.windows, () async {
+      await tester.pumpWidget(const RoomFitApp());
+      expect(find.textContaining('No fit warnings'), findsOneWidget);
+      expect(find.textContaining('Sampled walkway ~'), findsOneWidget);
+      expect(find.textContaining('(approx.)'), findsOneWidget);
+
+      for (final name in ['Shelf A', 'Shelf B']) {
+        await tester.tap(find.text('Custom'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const Key('field-0')), name);
+        await tester.tap(find.text('Apply'));
+        await tester.pumpAndSettle();
+      }
+
+      expect(
+        find.textContaining(
+          'Selected Shelf B · 900 × 600 mm (~35.4 × 23.6 in)',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          'Overlap — Furniture 0 and 1 overlap (approximate)',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Selected Shelf A'), findsOneWidget);
+
+      await tester.tap(find.text('900 mm'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Sampled walkway ~'), findsOneWidget);
     });
   });
 }
