@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:room_fit/fit_feedback.dart';
 import 'package:room_fit/room_geometry.dart';
 
 void main() {
@@ -148,6 +149,66 @@ void main() {
             ),
           ],
         ),
+        throwsArgumentError,
+      );
+    });
+  });
+
+  group('Live fit feedback', () {
+    test('empty room has a clear sampled route and no warnings', () {
+      final result = FitFeedback.evaluate(
+        RoomPlan(width: 4000, height: 3000),
+        targetMm: 800,
+      );
+      expect(result.walkwayMm, greaterThanOrEqualTo(800));
+      expect(result.warnings, isEmpty);
+    });
+
+    test('overlap and door swing stay visible with narrow route warning', () {
+      final plan = RoomPlan(
+        width: 4000,
+        height: 2000,
+        furniture: [
+          MmRect(800, 0, 2400, 700),
+          MmRect(800, 1300, 2400, 700),
+          MmRect(100, 100, 300, 300),
+          MmRect(200, 200, 200, 200),
+        ],
+        openings: [
+          Opening(
+            wall: Wall.north,
+            offset: 0,
+            span: 900,
+            kind: OpeningKind.door,
+          ),
+        ],
+      );
+      final result = FitFeedback.evaluate(plan, targetMm: 800);
+      expect(result.walkwayMm, isNotNull);
+      expect(result.walkwayMm!, lessThan(800));
+      expect(result.conflicts, contains('Furniture 2 and 3 overlap'));
+      expect(result.conflicts, contains('Furniture 2 blocks door 0 swing'));
+      expect(result.conflictItems, containsAll([2, 3]));
+      expect(
+        result.warnings.any((line) => line.contains('below 800 mm target')),
+        isTrue,
+      );
+    });
+
+    test('blocked sampled route and invalid target are explicit', () {
+      final plan = RoomPlan(
+        width: 4000,
+        height: 2000,
+        furniture: [MmRect(1900, 0, 200, 2000)],
+      );
+      final result = FitFeedback.evaluate(plan, targetMm: 700);
+      expect(result.walkwayMm, isNull);
+      expect(
+        result.warnings,
+        contains('No sampled left-to-right walkway found'),
+      );
+      expect(
+        () => FitFeedback.evaluate(plan, targetMm: 0),
         throwsArgumentError,
       );
     });
