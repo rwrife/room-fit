@@ -4,7 +4,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 
+import 'adaptive.dart';
 import 'furniture_catalog.dart';
 import 'fit_feedback.dart';
 import 'room_geometry.dart';
@@ -46,6 +48,23 @@ class _RoomEditorState extends State<RoomEditor> {
   bool get _ios =>
       defaultTargetPlatform == TargetPlatform.iOS ||
       defaultTargetPlatform == TargetPlatform.macOS;
+  bool get _windows => defaultTargetPlatform == TargetPlatform.windows;
+
+  /// Platform-native dialog presentation: ContentDialog on Windows,
+  /// Cupertino sheets on iOS, Material dialogs elsewhere.
+  Future<T?> _dialog<T>(WidgetBuilder builder) => _windows
+      ? fluent.showDialog<T>(context: context, builder: builder)
+      : _ios
+      ? showCupertinoDialog<T>(context: context, builder: builder)
+      : showDialog<T>(context: context, builder: builder);
+
+  /// Small helper text without assuming a Material Theme ancestor (Fluent
+  /// apps on Windows have no Material Theme widget above the root).
+  TextStyle? _smallText(BuildContext context) => _windows
+      ? fluent.FluentTheme.of(context).typography.body?.copyWith(fontSize: 12)
+      : _ios
+      ? CupertinoTheme.of(context).textTheme.textStyle.copyWith(fontSize: 12)
+      : Theme.of(context).textTheme.bodySmall;
 
   void _commit(RoomPlan next, List<String> nextNames) {
     setState(() {
@@ -165,13 +184,13 @@ class _RoomEditorState extends State<RoomEditor> {
     String title,
     List<String> labels,
     List<String> initial,
-  ) => showDialog<List<String>>(
-    context: context,
-    builder: (context) => _MeasurementDialog(
+  ) => _dialog<List<String>>(
+    (context) => _MeasurementDialog(
       title: title,
       labels: labels,
       initial: initial,
       ios: _ios,
+      windows: _windows,
     ),
   );
 
@@ -188,6 +207,19 @@ class _RoomEditorState extends State<RoomEditor> {
           content: Text(message),
           actions: [
             CupertinoDialogAction(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } else if (_windows) {
+      _dialog<void>(
+        (context) => fluent.ContentDialog(
+          title: const Text('Invalid measurement'),
+          content: Text(message),
+          actions: [
+            fluent.Button(
               onPressed: () => Navigator.pop(context),
               child: const Text('OK'),
             ),
@@ -282,9 +314,8 @@ class _RoomEditorState extends State<RoomEditor> {
   }
 
   Future<void> _addFromCatalog() async {
-    final item = await showDialog<FurnitureCatalogItem>(
-      context: context,
-      builder: (context) => _ios
+    final item = await _dialog<FurnitureCatalogItem>(
+      (context) => _ios
           ? CupertinoAlertDialog(
               title: const Text('Add furniture'),
               content: SizedBox(
@@ -304,6 +335,37 @@ class _RoomEditorState extends State<RoomEditor> {
               ),
               actions: [
                 CupertinoDialogAction(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            )
+          : _windows
+          ? fluent.ContentDialog(
+              title: const Text('Add furniture'),
+              content: SizedBox(
+                height: 360,
+                child: ListView(
+                  children: [
+                    for (final entry in FurnitureCatalog.items)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: fluent.Button(
+                          key: Key('catalog-${entry.id}'),
+                          onPressed: () => Navigator.pop(context, entry),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '${entry.name} · ${entry.widthMm} × ${entry.depthMm} mm',
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                fluent.Button(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Cancel'),
                 ),
@@ -334,20 +396,8 @@ class _RoomEditorState extends State<RoomEditor> {
     }
   }
 
-  Widget _action(String label, VoidCallback? onPressed) => Padding(
-    padding: const EdgeInsets.all(2),
-    child: _ios
-        ? CupertinoButton(
-            minimumSize: const Size(48, 44),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            onPressed: onPressed,
-            child: Text(label),
-          )
-        : OutlinedButton(
-            onPressed: onPressed,
-            child: Semantics(label: label, child: Text(label)),
-          ),
-  );
+  Widget _action(String label, VoidCallback? onPressed) =>
+      AdaptiveButton(label: label, onPressed: onPressed);
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
@@ -408,7 +458,7 @@ class _RoomEditorState extends State<RoomEditor> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Wrap(
+                  AdaptiveActions(
                     children: [
                       _action('Room size', _editRoom),
                       _action('Add opening', _addOpening),
@@ -443,10 +493,7 @@ class _RoomEditorState extends State<RoomEditor> {
                       child: Wrap(
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Text(
-                            'Clearance target',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
+                          Text('Clearance target', style: _smallText(context)),
                           for (var i = 0; i < clearanceTargets.length; i++)
                             _action(
                               '${clearanceTargets[i]} mm',
@@ -470,7 +517,7 @@ class _RoomEditorState extends State<RoomEditor> {
                       'Room ${plan.width} × ${plan.height} mm · tap or drag furniture · '
                       'arrows nudge, Shift+arrow 100 mm, Ctrl+Z undo, Delete removes. '
                       'Planning aid only — not building-code or accessibility compliance.',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: _smallText(context),
                     ),
                   ),
                   if (_selected != null)
@@ -628,12 +675,14 @@ class _MeasurementDialog extends StatefulWidget {
     required this.labels,
     required this.initial,
     required this.ios,
+    required this.windows,
   });
 
   final String title;
   final List<String> labels;
   final List<String> initial;
   final bool ios;
+  final bool windows;
 
   @override
   State<_MeasurementDialog> createState() => _MeasurementDialogState();
@@ -658,17 +707,13 @@ class _MeasurementDialogState extends State<_MeasurementDialog> {
       for (var i = 0; i < widget.labels.length; i++)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: widget.ios
-              ? CupertinoTextField(
-                  key: Key('field-$i'),
-                  controller: controllers[i],
-                  placeholder: widget.labels[i],
-                )
-              : TextField(
-                  key: Key('field-$i'),
-                  controller: controllers[i],
-                  decoration: InputDecoration(labelText: widget.labels[i]),
-                ),
+          child: KeyedSubtree(
+            key: Key('field-$i'),
+            child: AdaptiveTextField(
+              label: widget.labels[i],
+              controller: controllers[i],
+            ),
+          ),
         ),
     ];
     void apply() =>
@@ -686,6 +731,22 @@ class _MeasurementDialogState extends State<_MeasurementDialog> {
             child: const Text('Cancel'),
           ),
           CupertinoDialogAction(onPressed: apply, child: const Text('Apply')),
+        ],
+      );
+    }
+    if (widget.windows) {
+      return fluent.ContentDialog(
+        title: Text(widget.title),
+        content: SizedBox(
+          height: math.min(300, widget.labels.length * 70.0),
+          child: SingleChildScrollView(child: Column(children: inputs)),
+        ),
+        actions: [
+          fluent.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          fluent.FilledButton(onPressed: apply, child: const Text('Apply')),
         ],
       );
     }

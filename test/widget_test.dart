@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
+import 'package:room_fit/adaptive.dart';
 import 'package:room_fit/main.dart';
 import 'package:room_fit/room_editor.dart';
 
@@ -47,10 +49,93 @@ void main() {
         if (platform == TargetPlatform.iOS) {
           expect(find.byType(CupertinoNavigationBar), findsOneWidget);
           expect(find.byType(CupertinoButton), findsWidgets);
+        } else if (platform == TargetPlatform.windows) {
+          expect(find.byType(fluent.NavigationView), findsOneWidget);
+          expect(find.byType(fluent.PageHeader), findsOneWidget);
+          expect(find.byType(fluent.Button), findsWidgets);
+          // Windows must not render Material chrome or Cupertino chrome.
+          expect(find.byType(Scaffold), findsNothing);
+          expect(find.byType(CupertinoNavigationBar), findsNothing);
         } else {
           expect(find.byType(Scaffold), findsOneWidget);
           expect(find.byType(OutlinedButton), findsWidgets);
+          expect(find.byType(fluent.NavigationView), findsNothing);
         }
+      });
+    });
+  }
+
+  for (final width in [360.0, 768.0, 1280.0]) {
+    for (final platform in [
+      TargetPlatform.iOS,
+      TargetPlatform.android,
+      TargetPlatform.windows,
+    ]) {
+      testWidgets('$platform action layout at ${width.toInt()} px', (
+        tester,
+      ) async {
+        await _onPlatform(tester, platform, () async {
+          // Drive the breakpoint from the real layout constraint instead of
+          // the window size, since each shell adds its own padding.
+          await tester.pumpWidget(
+            Directionality(
+              textDirection: TextDirection.ltr,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: width,
+                  child: AdaptiveActions(
+                    children: const [Text('Room size'), Text('Catalog')],
+                  ),
+                ),
+              ),
+            ),
+          );
+          final rail = find.byWidgetPredicate(
+            (w) => w.key == const Key('adaptiveActionsRail'),
+          );
+          final wrap = find.byWidgetPredicate(
+            (w) => w.key == const Key('adaptiveActionsWrap'),
+          );
+          if (width < AdaptiveActions.tabletBreakpoint) {
+            expect(rail, findsOneWidget);
+            expect(wrap, findsNothing);
+          } else {
+            expect(wrap, findsOneWidget);
+            expect(rail, findsNothing);
+          }
+          expect(tester.takeException(), isNull);
+        });
+      });
+    }
+  }
+
+  for (final platform in [
+    TargetPlatform.iOS,
+    TargetPlatform.android,
+    TargetPlatform.windows,
+  ]) {
+    testWidgets('$platform measurement dialog uses native controls', (
+      tester,
+    ) async {
+      await _onPlatform(tester, platform, () async {
+        await tester.pumpWidget(const RoomFitApp());
+        await tester.tap(find.text('Room size'));
+        await tester.pumpAndSettle();
+        if (platform == TargetPlatform.iOS) {
+          expect(find.byType(CupertinoAlertDialog), findsOneWidget);
+          expect(find.byType(CupertinoTextField), findsNWidgets(2));
+        } else if (platform == TargetPlatform.windows) {
+          expect(find.byType(fluent.ContentDialog), findsOneWidget);
+          expect(find.byType(fluent.TextBox), findsNWidgets(2));
+        } else {
+          expect(find.byType(AlertDialog), findsOneWidget);
+          expect(find.byType(TextField), findsNWidgets(2));
+        }
+        await tester.enterText(find.byKey(const Key('field-0')), '5000');
+        await tester.tap(find.text('Apply'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Room 5000 × 3000 mm'), findsOneWidget);
       });
     });
   }
