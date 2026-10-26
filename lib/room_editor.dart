@@ -179,8 +179,9 @@ class _RoomEditorState extends State<RoomEditor> {
 
   Future<void> _deleteLayout() async {
     if (_book.layouts.length == 1 ||
-        !await _confirm('Delete ${_book.current.name}?'))
+        !await _confirm('Delete ${_book.current.name}?')) {
       return;
+    }
     if (!mounted) return;
     final current = _currentBook();
     final next = List<NamedLayout>.of(current.layouts)
@@ -222,8 +223,9 @@ class _RoomEditorState extends State<RoomEditor> {
       );
       if (picked == null || picked.files.isEmpty) return;
       final selected = picked.files.single;
-      if (selected.size > LayoutBook.maxBytes)
+      if (selected.size > LayoutBook.maxBytes) {
         throw const FormatException('Plan too large');
+      }
       final bytes =
           selected.bytes ??
           (selected.path == null
@@ -232,12 +234,14 @@ class _RoomEditorState extends State<RoomEditor> {
       if (bytes == null) throw const FormatException('Could not read file');
       final next = LayoutBook.decode(bytes);
       if (!mounted ||
-          !await _confirm('Replace all local layouts with imported layouts?'))
+          !await _confirm('Replace all local layouts with imported layouts?')) {
         return;
+      }
       if (!mounted) return;
       await _saving;
-      if (_store == null)
+      if (_store == null) {
         throw const FileSystemException('Local storage unavailable');
+      }
       await _store!.save(next);
       if (mounted) setState(() => _showBook(next));
     } on Object catch (e) {
