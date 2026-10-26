@@ -1,4 +1,7 @@
 import 'dart:math' as math;
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -9,11 +12,12 @@ import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'adaptive.dart';
 import 'furniture_catalog.dart';
 import 'fit_feedback.dart';
+import 'layout_store.dart';
 import 'room_geometry.dart';
 
-// ponytail: single room, rectangular footprints, fit-to-view zoom only;
-// multi-layout persistence is issue #6, pan-while-zoomed lands when touch
-// users need it (wrap canvas in InteractiveViewer then).
+// ponytail: rectangular footprints and fit-to-view zoom only; add pan-while-
+// zoomed when touch users need it (wrap canvas in InteractiveViewer then). Skip
+// undo across layout switches: each layout's edits persist independently.
 class RoomEditor extends StatefulWidget {
   const RoomEditor({super.key});
 
@@ -33,7 +37,214 @@ class _RoomEditorState extends State<RoomEditor> {
 
   RoomPlan plan = RoomPlan(width: 4000, height: 3000);
   List<String> names = const [];
+  late LayoutBook _book = LayoutBook([NamedLayout('Main', plan, names)], 0);
+  LayoutStore? _store;
+  Future<void> _saving = Future.value();
+  bool _ready = false;
   final List<_Snapshot> _history = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final store = await LayoutStore.inAppStorage();
+      final loaded = await store.load();
+      if (!mounted) return;
+      setState(() {
+        _store = store;
+        if (loaded != null && _history.isEmpty) _showBook(loaded);
+        _ready = true;
+      });
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() => _ready = true);
+      _error(
+        'Unable to load saved layouts: $e. Current changes will not save.',
+      );
+    }
+  }
+
+  void _showBook(LayoutBook book) {
+    _book = book;
+    plan = book.current.plan;
+    names = book.current.names;
+    _history.clear();
+    _selected = null;
+  }
+
+  LayoutBook _currentBook() {
+    final layouts = List<NamedLayout>.of(_book.layouts);
+    layouts[_book.active] = NamedLayout(_book.current.name, plan, names);
+    return LayoutBook(layouts, _book.active);
+  }
+
+  void _save() {
+    if (!_ready || _store == null) return;
+    final book = _currentBook();
+    _book = book;
+    _saving = _saving.then((_) => _store!.save(book)).catchError((Object e) {
+      _error('Unable to save layouts: $e');
+    });
+  }
+
+  Future<bool> _confirm(String title) async =>
+      await _dialog<bool>(
+        (context) => _ios
+            ? CupertinoAlertDialog(
+                title: Text(title),
+                actions: [
+                  CupertinoDialogAction(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel'),
+                  ),
+                  CupertinoDialogAction(
+                    isDestructiveAction: true,
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Continue'),
+                  ),
+                ],
+              )
+            : _windows
+            ? fluent.ContentDialog(
+                title: Text(title),
+                actions: [
+                  fluent.Button(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel'),
+                  ),
+                  fluent.Button(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Continue'),
+                  ),
+                ],
+              )
+            : AlertDialog(
+                title: Text(title),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Continue'),
+                  ),
+                ],
+              ),
+      ) ==
+      true;
+
+  Future<void> _duplicateLayout() async {
+    final values = await _fields(
+      'Duplicate layout',
+      const ['New name'],
+      ['${_book.current.name} copy'],
+    );
+    if (values == null || !mounted) return;
+    final name = values.single.trim();
+    try {
+      final current = _currentBook();
+      final next = LayoutBook([
+        ...current.layouts,
+        NamedLayout(name, plan, names),
+      ], current.layouts.length);
+      setState(() => _showBook(next));
+      _save();
+    } on FormatException catch (e) {
+      _error('$e');
+    }
+  }
+
+  Future<void> _renameLayout() async {
+    final values = await _fields(
+      'Rename layout',
+      const ['Name'],
+      [_book.current.name],
+    );
+    if (values == null || !mounted) return;
+    try {
+      final current = _currentBook();
+      final next = List<NamedLayout>.of(current.layouts);
+      next[current.active] = NamedLayout(values.single.trim(), plan, names);
+      setState(() => _showBook(LayoutBook(next, current.active)));
+      _save();
+    } on FormatException catch (e) {
+      _error('$e');
+    }
+  }
+
+  Future<void> _deleteLayout() async {
+    if (_book.layouts.length == 1 ||
+        !await _confirm('Delete ${_book.current.name}?'))
+      return;
+    if (!mounted) return;
+    final current = _currentBook();
+    final next = List<NamedLayout>.of(current.layouts)
+      ..removeAt(current.active);
+    setState(
+      () => _showBook(
+        LayoutBook(next, math.min(current.active, next.length - 1)),
+      ),
+    );
+    _save();
+  }
+
+  Future<void> _exportLayouts() async {
+    try {
+      await _saving;
+      final bytes = _currentBook().encode();
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Export Room Fit layouts',
+        fileName: 'room-fit.json',
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        bytes: bytes,
+      );
+      if (path == null) return;
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        await File(path).writeAsBytes(bytes, flush: true);
+      }
+    } on Object catch (e) {
+      _error('Export failed: $e');
+    }
+  }
+
+  Future<void> _importLayouts() async {
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) return;
+      final selected = picked.files.single;
+      if (selected.size > LayoutBook.maxBytes)
+        throw const FormatException('Plan too large');
+      final bytes =
+          selected.bytes ??
+          (selected.path == null
+              ? null
+              : await File(selected.path!).readAsBytes());
+      if (bytes == null) throw const FormatException('Could not read file');
+      final next = LayoutBook.decode(bytes);
+      if (!mounted ||
+          !await _confirm('Replace all local layouts with imported layouts?'))
+        return;
+      if (!mounted) return;
+      await _saving;
+      if (_store == null)
+        throw const FileSystemException('Local storage unavailable');
+      await _store!.save(next);
+      if (mounted) setState(() => _showBook(next));
+    } on Object catch (e) {
+      _error('Import failed: $e');
+    }
+  }
+
   int? _selected;
   double _zoom = 1;
   bool _snap = true;
@@ -73,6 +284,7 @@ class _RoomEditorState extends State<RoomEditor> {
       names = nextNames;
       if (_selected != null && _selected! >= names.length) _selected = null;
     });
+    _save();
   }
 
   void _undo() {
@@ -83,6 +295,7 @@ class _RoomEditorState extends State<RoomEditor> {
       names = previous.names;
       if (_selected != null && _selected! >= names.length) _selected = null;
     });
+    _save();
   }
 
   RoomPlan _copy({
@@ -174,6 +387,7 @@ class _RoomEditorState extends State<RoomEditor> {
   void _dragEnd() {
     if (_dragSnapshot != null) {
       setState(() => _history.add(_dragSnapshot!));
+      _save();
     }
     _dragPointerStart = null;
     _dragPieceStart = null;
@@ -203,7 +417,7 @@ class _RoomEditorState extends State<RoomEditor> {
       showCupertinoDialog<void>(
         context: context,
         builder: (context) => CupertinoAlertDialog(
-          title: const Text('Invalid measurement'),
+          title: const Text('Room Fit'),
           content: Text(message),
           actions: [
             CupertinoDialogAction(
@@ -216,7 +430,7 @@ class _RoomEditorState extends State<RoomEditor> {
     } else if (_windows) {
       _dialog<void>(
         (context) => fluent.ContentDialog(
-          title: const Text('Invalid measurement'),
+          title: const Text('Room Fit'),
           content: Text(message),
           actions: [
             fluent.Button(
@@ -460,6 +674,38 @@ class _RoomEditorState extends State<RoomEditor> {
                 children: [
                   AdaptiveActions(
                     children: [
+                      for (var i = 0; i < _book.layouts.length; i++)
+                        _action(
+                          'Layout: ${_book.layouts[i].name}${i == _book.active ? ' ✓' : ''}',
+                          () {
+                            if (!_ready || i == _book.active) return;
+                            setState(
+                              () => _showBook(
+                                LayoutBook(_currentBook().layouts, i),
+                              ),
+                            );
+                            _save();
+                          },
+                        ),
+                      _action(
+                        'Duplicate layout',
+                        _ready ? _duplicateLayout : null,
+                      ),
+                      _action('Rename layout', _ready ? _renameLayout : null),
+                      _action(
+                        'Delete layout',
+                        _ready && _book.layouts.length > 1
+                            ? _deleteLayout
+                            : null,
+                      ),
+                      _action(
+                        'Export JSON',
+                        _ready && _store != null ? _exportLayouts : null,
+                      ),
+                      _action(
+                        'Import JSON',
+                        _ready && _store != null ? _importLayouts : null,
+                      ),
                       _action('Room size', _editRoom),
                       _action('Add opening', _addOpening),
                       _action('Catalog', _addFromCatalog),
