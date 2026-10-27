@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed tag to publish
+        required: false
+        type: string
+      dry_run:
+        description: Verify builds without publishing
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.47.7'
+
+jobs:
+  windows:
+    name: Windows release bundle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: python tool/check_icons.py
+      - run: flutter pub get
+      - run: flutter test
+      - run: flutter build windows --release
+      - name: Bundle portable release
+        shell: pwsh
+        run: |
+          $source = 'build/windows/x64/runner/Release'
+          if (!(Test-Path "$source/room_fit.exe")) { throw 'Windows executable missing' }
+          Compress-Archive -Path "$source/*" -DestinationPath room-fit-windows.zip
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path room-fit-windows.zip))
+          try {
+            if (!$zip.Entries.Where({ $_.FullName -eq 'room_fit.exe' })) { throw 'Executable missing from archive' }
+          } finally { $zip.Dispose() }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: room-fit-windows
+          path: room-fit-windows.zip
+          if-no-files-found: error
+
+  android:
+    name: Android debug compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: python3 tool/check_icons.py
+      - run: flutter pub get
+      - run: flutter build apk --debug
+
+  ios:
+    name: iOS simulator compile
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: python3 tool/check_icons.py
+      - run: flutter pub get
+      - run: flutter build ios --simulator --no-codesign
+
+  publish:
+    name: Publish Windows release
+    if: github.event_name == 'push' || (!inputs.dry_run && inputs.tag != '')
+    needs: [windows, android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: room-fit-windows
+      - name: Publish verified archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9] ]] || { printf 'Expected v-prefixed version tag\n' >&2; exit 1; }
+          test -s room-fit-windows.zip
+          git fetch --tags
+          git rev-parse --verify "refs/tags/$TAG" >/dev/null
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --notes 'Room Fit Windows portable release.'
+          fi
+          gh release upload "$TAG" room-fit-windows.zip --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name' | python3 -c "import sys; lines = sys.stdin.read().splitlines(); assert 'room-fit-windows.zip' in lines, lines"
