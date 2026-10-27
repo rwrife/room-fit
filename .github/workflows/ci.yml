@@ -22,6 +22,8 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Check platform icon sets
+        run: python tool/check_icons.py
       - name: Pub get
         run: flutter pub get
       - name: Verify formatting
@@ -46,6 +48,8 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Check platform icon sets
+        run: python3 tool/check_icons.py
       - name: Pub get
         run: flutter pub get
       - name: Test
